@@ -1,0 +1,474 @@
+﻿
+-- IMPORTANT: BEFORE CREATING ANY TABLE, MAKE SURE YOU RUN THIS COMMAND 
+ADD JAR /opt/cloudera/parcels/CDH/lib/hive/lib/hive-hcatalog-core-1.1.0-cdh5.11.2.jar;
+
+-- CREATE EXTERNAL TABLE 
+create external table if not exists yellow(
+VendorID int,
+tpep_pickup_datetime timestamp,
+tpep_dropoff_datetime timestamp,
+passenger_count int,
+trip_distance double,
+RatecodeID int,
+store_and_fwd_flag string,
+PULocationID int,
+DOLocationID int,
+payment_type int,
+fare_amount double,
+extra double,
+mta_tax double,
+tip_amount double,
+tolls_amount double,
+improvement_surcharge double,
+total_amount double)
+row format delimited fields terminated by ','
+location '/common_folder/nyc_taxi_data/'
+tblproperties ("skip.header.line.count"="1");
+
+select * from yellow limit 10;
+
+
+--Basic Data Quality Checks
+
+--How many records has each TPEP provider provided? Write a query that summarises the number of records of each provider.
+
+select VendorID,count(*)
+from yellow
+group by VendorID;
+
+--Vendor 1 has 527386 records
+-- Vendor 2 has 647183 records
+
+
+
+--Checking pickup date year:
+
+select date_format(tpep_pickup_datetime,'yyyy') as year_a ,count(*)
+from yellow
+group by date_format(tpep_pickup_datetime,'yyyy');
+
+select count(*) from yellow
+where date_format(tpep_pickup_datetime,'yyyy')!=2017;
+
+-- There are 8 rows which do not have year as 2017 as pickup
+
+select date_format(tpep_pickup_datetime,'yyyy') as year_a ,date_format(tpep_pickup_datetime,'MM') as Months,count(*)
+from yellow
+group by date_format(tpep_pickup_datetime,'yyyy'),date_format(tpep_pickup_datetime,'MM');
+
+select count(*)
+from yellow where date_format(tpep_pickup_datetime,'yyyy')!=2017 or
+date_format(tpep_pickup_datetime,'MM') not in (11,12);
+
+--There are 14 rows where year 2017 and months of Nov. and december is not matched.So counting it as error
+
+
+
+--Checking months data;
+select date_format(tpep_pickup_datetime,'MM') as Months  ,count(*)
+from yellow
+group by date_format(tpep_pickup_datetime,'MM');
+
+select count(*) from yellow
+where date_format(tpep_pickup_datetime,'MM')!=11 and date_format(tpep_pickup_datetime,'MM')!=12;
+
+--There are 12 rows where months where not november and december 
+
+select VendorID ,count(*) as count_error from yellow
+where date_format(tpep_pickup_datetime,'yyyy') !=2017 or date_format(tpep_pickup_datetime,'MM')!=11 or
+date_format(tpep_pickup_datetime,'MM')!=12
+or date_format(tpep_dropoff_datetime,'yyyy') !=2017 or date_format(tpep_dropoff_datetime ,'MM')!=11 or
+date_format(tpep_dropoff_datetime ,'MM')!=12
+group by VendorId;
+
+
+select date_format(tpep_pickup_datetime,'yyyy') as year_a,date_format(tpep_pickup_datetime,'MM') as months,count(*) as counts
+from yellow
+group  by date_format(tpep_pickup_datetime,'yyyy') ,date_format(tpep_pickup_datetime,'MM');
+
+
+-- checking for drop time:
+select date_format(tpep_dropoff_datetime,'yyyy') as year_a,date_format(tpep_dropoff_datetime,'MM') as months,count(*) as counts
+from yellow
+group  by date_format(tpep_dropoff_datetime,'yyyy') ,date_format(tpep_dropoff_datetime,'MM');
+
+--Pickup time should be less than drop timing.
+--So checking if there is any ambiguty/error where pickup time is greater than drop time
+SELECT count(*) as error_timestamp 
+FROM yellow
+where tpep_pickup_datetime > tpep_dropoff_datetime;
+
+-- There are 73 rows which have discrepancy as pick up time is greater than drop time
+
+--Checking Passenger count
+
+select passenger_count ,count(*) from yellow
+group by passenger_count
+order by passenger_count ;
+
+-- There are 6824 rows where passenger count is 0,which is treated as error
+-- Passanger 0 doesn't makes sense.
+
+
+
+--Checking trip distance
+select trip_distance  ,count(*) from yellow
+group by trip_distance 
+order by trip_distance  ;  
+--There are 7402 rows where trip distance is 0
+
+select count(*) from yellow
+where trip_distance == 0 and passenger_count == 0;
+-- 110 is the number of rows where passenger count and trip covered are 0,can be treated as error
+
+
+--Checking Ratecode
+select RatecodeID ,count(*)  from yellow
+group by RatecodeID
+order by RatecodeID;
+
+-- ratecodeid 99 is added is data set which is a error with 9 rows.
+-- ratecode 1 has 1142278 rows
+--rate code 2 has 25338 rows
+-- rate code 3 has 2562 rows
+-- rate code 4 has 586 rows
+--rate code 5 has 3793 rows
+-- rate code 6 has 3 rows
+
+select count(*) from yellow 
+where RatecodeID not in (1,2,3,4,5,6);
+
+--Other than ratecode ID as 1,2,3,4,5,6 is treated as error
+
+--Checking store_and_fwd_flag
+
+select store_and_fwd_flag ,count(*) from yellow
+group by store_and_fwd_flag ;
+
+-- N has count of 1170618
+-- Y has count of 3951
+
+
+
+--Checking Payment_type
+select Payment_type,count(*) from yellow
+group by Payment_type order by Payment_type;
+
+--There is no rows which has payment type other than what is specified as standard.
+
+
+--Checking fare_amount
+
+select min(fare_amount) as minimum_fare,max(fare_amount) as max_fare ,avg(fare_amount) as average_fare from yellow;
+
+-- fare amount cannot be less or equal to 0
+
+select count(*) from yellow
+where fare_amount <= 0;
+
+-- There are 870 rows where fare amount is less or equal to 0,which is treated as error
+
+
+
+--Checking extra charges
+select extra,count(*)  from yellow 
+group by extra ;
+--There are many other extra charges levied other than $0.50 and $1 which can be treated as error
+
+--Extra charges can be taken as either 0 or ($0.50 and $1) as rush hour and overnight charges,other than this is treated as error.Checking error rows
+
+select count(*) from yellow 
+where extra not in (0,0.5,1);
+
+
+--There are 4856 rows which have extra charges neither 0.5 nor 1.Hence,these can be traeted as error
+
+
+
+
+--Checking mta_tax
+select mta_tax ,count(*) from yellow
+group by  mta_tax ;
+
+-- There are many other MTA tax levied other than $0.50 ,which can be treated as error. 
+
+select count(*) from yellow 
+where mta_tax!=0.5;
+
+-- 5745 rows are there which has MTA_tax other than 0.5
+
+
+
+--Checking Improvement_surcharge
+select Improvement_surcharge , count(*) from yellow
+group by Improvement_surcharge;
+
+-- Improvement_surcharge other than $0.30 can be treated as errors
+
+select count(*) from yellow
+where Improvement_surcharge!=0.3;
+
+-- 849 rows are there where Improvement_surcharge is other than $0.30 
+
+
+
+
+--for cash tips are not inculded.Checking that for cash payment if tip is registered or not
+select tip_amount ,count(*) 
+from  yellow where payment_type  == 2 
+group by tip_amount;
+
+--All cash payments have 0 registered tips
+
+
+select count(*)
+from yellow where tip_amount <0;
+group by tip_amount;
+
+--tip amount less than 0 is treated as error and has 4 count
+
+
+
+--Checking Tolls_amount
+
+select count(*) from yellow
+where Tolls_amount<0;
+
+-- 3 rows where Tolls_amount is less than 0 ,can be treated as error
+
+
+--Checking Total_amount
+select count(*) from yellow
+where Total_amount<0;
+-- 558 rows where Total_amount is less than 0, can be treated as error
+
+
+-- Thus, ED is completed.
+--Now, making conclusion that which vendor is doing wrong job
+
+
+
+select VendorID ,count(*) as count_error from yellow
+where date_format(tpep_pickup_datetime,'yyyy') !=2017 
+or  date_format(tpep_pickup_datetime,'MM') not in (11,12)
+or date_format(tpep_dropoff_datetime,'yyyy') !=2017 
+or date_format(tpep_dropoff_datetime ,'MM') not in (11,12)
+or tpep_pickup_datetime > tpep_dropoff_datetime
+or passenger_count=0
+or trip_distance = 0 
+or RatecodeID not in (1,2,3,4,5,6)
+or fare_amount <= 0
+or extra not in (0,0.5,1)
+or mta_tax!=0.5
+or Improvement_surcharge!=0.3
+or tip_amount <0
+or Tolls_amount<0
+or Total_amount<0
+group by VendorID;
+--order by count_error;
+
+--Vendor id 2  "VeriFone Inc" has 8183 errors out of 647183 rows,which means 1.26% rows are having error
+--Vendor id 1 " Creative Mobile Technologies" has 14787 errors out of 14787 rows ,which means  2.80% rows are having error
+--Conclusion: Vendor id 1 " Creative Mobile Technologies" is doing worse job.
+
+
+--IMPORTANT: Before partitioning any table, make sure you run the below commands.
+
+ SET hive.exec.max.dynamic.partitions=100000;
+SET hive.exec.max.dynamic.partitions.pernode=100000;
+
+
+
+--ORC partition:
+create external table if not exists yellow_partition_orc
+(VendorID int,
+tpep_pickup_datetime timestamp,
+tpep_dropoff_datetime timestamp,
+passenger_count int,
+trip_distance double,
+RatecodeID int,
+store_and_fwd_flag string,
+PULocationID int,
+DOLocationID int,
+payment_type int,
+fare_amount double,
+extra double,
+mta_tax double,
+tip_amount double,
+tolls_amount double,
+improvement_surcharge double,
+total_amount double
+) partitioned by (yr int, mnth int)
+stored as orc location '/user/hive/warehouse/yellow_abhinav_orc'
+tblproperties ("orc.compress"="SNAPPY");
+
+
+
+--Inserting data
+insert overwrite table yellow_partition_orc partition(yr , mnth)
+select VendorID , tpep_pickup_datetime ,tpep_dropoff_datetime ,
+passenger_count ,trip_distance ,RatecodeID ,store_and_fwd_flag ,
+PULocationID ,DOLocationID ,payment_type ,fare_amount ,
+extra ,mta_tax ,tip_amount ,tolls_amount ,
+improvement_surcharge ,total_amount ,date_format(tpep_pickup_datetime,'yyyy') as yr,date_format(tpep_dropoff_datetime ,'MM') as mnth
+from yellow where
+date_format(tpep_pickup_datetime,'yyyy') =2017 
+and  date_format(tpep_pickup_datetime,'MM') in (11,12)
+and date_format(tpep_dropoff_datetime,'yyyy') =2017 
+and date_format(tpep_dropoff_datetime ,'MM')  in (11,12)
+and tpep_pickup_datetime < tpep_dropoff_datetime
+and passenger_count!=0 and trip_distance > 0 and RatecodeID in (1,2,3,4,5,6)
+and fare_amount > 0 and extra in (0,0.5,1) and mta_tax=0.5
+and Improvement_surcharge=0.3 and tip_amount >=0
+and Tolls_amount>=0 and Total_amount >= 0;
+
+
+
+--Analysis-I
+
+--1.Compare the overall average fare per trip for November and December.
+
+select mnth as Month ,avg(fare_amount) as Average_fare from yellow_partition_orc
+group by mnth;
+
+--Averge fare for Month November which is $12.73 higher than December fare which is $12.52
+
+
+--2.Explore the ‘number of passengers per trip’ - how many trips are made by each level of ‘Passenger_count’? 
+--Do most people travel solo or with other people?
+
+select passenger_count as Num_of_Passenger , count(*) as count from yellow_partition_orc
+group by passenger_count;
+
+--Yes most people prefer to travel solo.
+
+
+
+--3.Which is the most preferred mode of payment?
+
+select payment_type ,count(*) as count_records from yellow_partition_orc
+group by payment_type order by count_records desc;
+
+--Most preferred type of payment is "Credit card"
+
+
+
+--4.What is the average tip paid per trip?
+
+select avg(tip_amount) as Average_tip from yellow_partition_orc;
+
+--Average tip amount is $1.80
+
+--Compare the average tip with the 25th, 50th and 75th percentiles and comment whether the ‘average tip’ is a representative statistic (of the central tendency) of ‘tip amount paid’
+select percentile_approx(tip_amount,0.25) as 25th_percentile_amount, 
+percentile_approx(tip_amount,0.50) as 50th_percentile_amount,
+percentile_approx(tip_amount,0.75) as 75th_percentile_amount
+from yellow_partition_orc;
+
+--25th Percentile tip amount is 0
+-- 5oth Percentile tip amount is $1.35
+-- 75th Percentile tip amount is $2.45
+--Average tip is not a representative statistic (of the central tendency) of ‘tip amount paid’.
+--Reason being there is a difference of 0.45$ b/w average and 5oth percentile(median).
+--So Average lies right side of median which means it is skewed right of the median.So it's a positevely skewed.
+
+--5.Explore the ‘Extra’ (charge) variable - what fraction of total trips have an extra charge is levied?
+select extra ,count(*)
+from yellow_partition_orc 
+group by extra;
+
+select sum(case when extra != 0 then 1 else 0 end) as Extra_charge_trips, count(*)as Total_trip,
+round(sum(case when extra != 0 then 1 else 0 end)/count(*),3) as Fraction_of_total_trip_with_extra_charge
+from yellow_partition_orc;
+
+--0.462 fraction of total trips have an extra charge is levied.
+
+
+
+
+--Analysis-II
+--1.What is the correlation between the number of passengers on any given trip, and the tip paid per trip? 
+--Do multiple travellers tip more compared to solo travellers? 
+
+select corr(passenger_count ,tip_amount )
+from yellow_partition_orc;
+--Correlation between Number of paasenger and tip amount is -0.0047
+
+select avg(tip_amount) as Solo_passenger_tip
+from yellow_partition_orc
+where passenger_count=1;
+
+--Solo passenger average tip is 1.8099
+
+select avg(tip_amount) as muntiple_passenger_tip
+from yellow_partition_orc
+where passenger_count!=1;
+--In group average tip is 1.778
+
+--Correlation between Number of passenger and tip amount is -0.004,which tells that with increase in no. of passenger tip amount decreases
+--Solo Passenger average tip is 1.8099
+--muntiple passenger average tip is 1.778
+--Clearly above stats prove negative correlation b/w Number of paasenger and tip amount
+--Hence,Solo traveller tip more than muntiple travellers
+
+
+
+--2.Segregate the data into five segments of ‘tip paid’: [0-5), [5-10), [10-15) , [15-20) and >=20. Calculate the percentage share of each bucket 
+--(i.e. the fraction of trips falling in each bucket).
+
+select segment , count(*) as Number_of_records, max(records_count)as total_records, 
+count(*)/max(records_count) as fraction_of_tips
+from (select count(*) over () records_count,
+	case when tip_amount >= 0 and tip_amount <5 then '0-5_segment' 
+	when tip_amount >=5 and tip_amount < 10 then '5_10_segment'
+	when tip_amount >=10 and tip_amount < 15 then '10_15_segment'
+	when tip_amount >=15 and tip_amount < 20 then '15_20_segment'
+	else '20+_segment' end as segment from yellow_partition_orc )as a 
+	group by segment order by fraction_of_tips desc;
+
+--0-5) has 92.57% of the records
+--[5-10) has 5.6 % of the records
+--[10-15) has 1.6% of the records
+--[15-20) has 0.11% of the records
+-->=20. has 0.05% of the records
+
+
+
+
+--3.Which month has a greater average ‘speed’ - November or December? 
+
+select avg(case when mnth =11 then (trip_distance/((unix_timestamp(tpep_dropoff_datetime) - unix_timestamp(tpep_pickup_datetime))/3600)) else null end) 
+as NovemberSpeed_MilesperHour ,
+avg(case when mnth =12 then (trip_distance/((unix_timestamp(tpep_dropoff_datetime) - unix_timestamp(tpep_pickup_datetime))/3600)) else null end) 
+as DecemberSpeed_MilesperHour
+from yellow_partition_orc;
+
+--November Average speed is 10.89 Miles per hour
+-- December Average speed is 10.985 Miles per hour
+--Hence, December has greater Average Speed than November
+
+
+
+--4.Analyse the average speed of the most happening days of the year, i.e. 31st December (New year’s eve) and 25th December (Christmas) 
+--and compare it with the overall average
+
+select
+avg(case when mnth =12 and day(FROM_UNIXTIME(unix_timestamp(tpep_pickup_datetime)))=25 then (trip_distance/((unix_timestamp(tpep_dropoff_datetime) - unix_timestamp(tpep_pickup_datetime))/3600)) else null end) 
+as Christmas_Speed_MilesperHour,
+avg(case when mnth =12 and day(FROM_UNIXTIME(unix_timestamp(tpep_pickup_datetime)))=31 then (trip_distance/((unix_timestamp(tpep_dropoff_datetime) - unix_timestamp(tpep_pickup_datetime))/3600)) else null end) 
+as New_years_eve_Speed_MilesperHour,
+avg(case when mnth in (11,12) then (trip_distance/((unix_timestamp(tpep_dropoff_datetime) - unix_timestamp(tpep_pickup_datetime))/3600)) else null end) 
+as Overall_average_Speed_MilesperHour
+from yellow_partition_orc;
+
+--Christamas Eve Average Speed is 15.048 Miles per hour
+-- New Year eve Average Speed is 13.23 Miles per hour
+--Overall Average Speed is 10.94 Miles per hour
+--Thus,At christmas Average Speed is much higher than the overall Average
+--At New Year Eve also Average speed is higher than overall Average
+--At Christmas Average Speed is more tha New year Eve.
+
+
+
+
+
